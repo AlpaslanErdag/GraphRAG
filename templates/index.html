@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphRAG — Ajan Hafıza Sistemi</title>
+    <script src="https://unpkg.com/3d-force-graph"></script>
+    <script src="https://unpkg.com/force-graph"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-base:       #050508;
+            --bg-surface:    rgba(12, 12, 20, 0.92);
+            --bg-elevated:   rgba(22, 22, 35, 0.95);
+            --border:        rgba(255,255,255,0.07);
+            --border-accent: rgba(99, 179, 237, 0.35);
+            --accent-blue:   #63b3ed;
+            --accent-cyan:   #00e5ff;
+            --accent-green:  #68d391;
+            --accent-red:    #fc8181;
+            --accent-amber:  #f6c90e;
+            --text-primary:  #e2e8f0;
+            --text-secondary:#94a3b8;
+            --text-muted:    #4a5568;
+            --glow-blue:     0 0 20px rgba(99,179,237,0.15);
+            --radius-sm:     6px;
+            --radius-md:     10px;
+            --radius-lg:     16px;
+            --transition:    0.2s ease;
+        }
+
+        html, body {
+            height: 100%; overflow: hidden;
+            background: var(--bg-base);
+            font-family: 'Inter', sans-serif;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+
+        /* ─── TOPOLOGY (layout grid) ─── */
+        #graph-container {
+            position: fixed; inset: 0; z-index: 0;
+        }
+
+        /* ─── TOP BAR ─── */
+        #topbar {
+            position: fixed; top: 0; left: 0; right: 0; height: 52px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; z-index: 100;
+        }
+
+        .topbar-brand {
+            display: flex; align-items: center; gap: 10px;
+        }
+        .topbar-logo {
+            width: 28px; height: 28px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 700; color: #000;
+        }
+        .topbar-title {
+            font-size: 14px; font-weight: 600; letter-spacing: 0.02em;
+            color: var(--text-primary);
+        }
+        .topbar-subtitle {
+            font-size: 11px; color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .topbar-stats {
+            display: flex; align-items: center; gap: 6px;
+        }
+        .stat-chip {
+            display: flex; align-items: center; gap: 5px;
+            background: var(--bg-elevated); border: 1px solid var(--border);
+            border-radius: 20px; padding: 4px 10px;
+            font-size: 11px; color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .stat-chip .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+        }
+        .dot-blue  { background: var(--accent-blue); box-shadow: 0 0 6px var(--accent-blue); }
+        .dot-cyan  { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+        .dot-green { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+
+        .topbar-controls {
+            display: flex; align-items: center; gap: 6px;
+        }
+        .view-toggle {
+            display: flex; background: var(--bg-elevated);
+            border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+        }
+        .view-btn {
+            padding: 5px 14px; font-size: 11px; font-weight: 500;
+            background: transparent; color: var(--text-secondary);
+            border: none; cursor: pointer; transition: var(--transition);
+            font-family: 'Inter', sans-serif;
+        }
+        .view-btn.active {
+            background: var(--accent-blue); color: #000; font-weight: 600;
+        }
+        .view-btn:hover:not(.active) { background: rgba(99,179,237,0.1); color: var(--text-primary); }
+
+        /* ─── STATUS BADGE ─── */
+        #status-badge {
+            display: flex; align-items: center; gap: 6px;
+            background: var(--bg-elevated); border: 1px solid var(--border);
+            border-radius: 20px; padding: 4px 12px;
+            font-size: 11px; color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            transition: var(--transition);
+        }
+        #status-badge.loading { border-color: var(--accent-amber); color: var(--accent-amber); }
+        #status-badge.success { border-color: var(--accent-green); color: var(--accent-green); }
+        #status-badge.error   { border-color: var(--accent-red);   color: var(--accent-red); }
+        .pulse-dot {
+            width: 6px; height: 6px; border-radius: 50%; background: var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+        #status-badge.loading .pulse-dot { background: var(--accent-amber); }
+        #status-badge.error   .pulse-dot { background: var(--accent-red); animation: none; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%       { opacity: 0.4; transform: scale(0.75); }
+        }
+
+        /* ─── SIDE PANELS ─── */
+        .panel {
+            position: fixed; top: 64px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            backdrop-filter: blur(14px);
+            z-index: 50;
+            display: flex; flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+
+        #left-panel  { left: 16px;  width: 300px; }
+        #right-panel { right: 16px; width: 340px; max-height: calc(100vh - 80px); }
+
+        .panel-header {
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .panel-icon {
+            width: 24px; height: 24px; border-radius: var(--radius-sm);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px;
+        }
+        .panel-icon.blue { background: rgba(99,179,237,0.15); }
+        .panel-icon.purple { background: rgba(159,122,234,0.15); }
+        .panel-title {
+            font-size: 12px; font-weight: 600; color: var(--text-primary); letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+        .panel-desc {
+            font-size: 10px; color: var(--text-muted); margin-top: 1px;
+        }
+
+        .panel-body { padding: 14px 16px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+
+        /* ─── FORM ELEMENTS ─── */
+        label {
+            font-size: 10px; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.08em;
+            display: block; margin-bottom: 4px;
+        }
+
+        textarea, input[type="text"] {
+            width: 100%;
+            background: rgba(0,0,0,0.4);
+            color: var(--accent-cyan);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 9px 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+            line-height: 1.55;
+            outline: none;
+            transition: border-color var(--transition), box-shadow var(--transition);
+            resize: none;
+        }
+        textarea { height: 108px; }
+        textarea:focus, input[type="text"]:focus {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(99,179,237,0.1);
+        }
+
+        /* ─── BUTTONS ─── */
+        .btn {
+            width: 100%; padding: 9px 14px;
+            border: none; border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 12px; font-weight: 600;
+            cursor: pointer; letter-spacing: 0.02em;
+            transition: opacity var(--transition), transform var(--transition);
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .btn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+        .btn:active:not(:disabled) { transform: translateY(0); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4facfe, #00e5ff);
+            color: #000;
+        }
+        .btn-danger {
+            background: linear-gradient(135deg, #ff416c, #ff4b2b);
+            color: #fff;
+        }
+        .btn-ask {
+            background: linear-gradient(135deg, #9f7aea, #667eea);
+            color: #fff;
+        }
+
+        /* ─── DIVIDER ─── */
+        .divider {
+            height: 1px; background: var(--border); margin: 2px 0;
+        }
+
+        /* ─── CHAT ─── */
+        #chat-history {
+            flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+            padding: 4px 2px; min-height: 180px; max-height: calc(100vh - 380px);
+            scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+        }
+
+        .chat-empty {
+            color: var(--text-muted); font-size: 11px; text-align: center;
+            margin: auto; padding: 24px 0;
+            font-style: italic;
+        }
+
+        .chat-bubble-wrap { display: flex; flex-direction: column; gap: 2px; }
+
+        .chat-meta {
+            font-size: 10px; color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace; padding: 0 4px;
+        }
+        .chat-meta.user  { color: var(--accent-blue); }
+        .chat-meta.agent { color: var(--accent-green); }
+
+        .chat-bubble {
+            padding: 8px 11px; border-radius: var(--radius-md);
+            font-size: 12px; line-height: 1.5;
+        }
+        .bubble-user {
+            background: rgba(99,179,237,0.1);
+            border: 1px solid rgba(99,179,237,0.2);
+            color: var(--text-primary);
+            align-self: flex-end; max-width: 90%;
+        }
+        .bubble-agent {
+            background: rgba(104,211,145,0.07);
+            border: 1px solid rgba(104,211,145,0.18);
+            color: var(--text-primary);
+            align-self: flex-start; max-width: 95%;
+            border-left: 2px solid var(--accent-green);
+        }
+        .bubble-thinking {
+            background: rgba(246,201,14,0.07);
+            border: 1px solid rgba(246,201,14,0.2);
+            color: var(--accent-amber);
+            font-style: italic; font-size: 11px;
+        }
+
+        /* ─── CHAT INPUT ROW ─── */
+        .chat-input-row {
+            display: flex; gap: 6px; align-items: flex-end;
+        }
+        .chat-input-row input {
+            flex: 1; margin-bottom: 0;
+        }
+        .btn-send {
+            width: 36px; height: 36px; flex-shrink: 0;
+            background: linear-gradient(135deg, #9f7aea, #667eea);
+            border: none; border-radius: var(--radius-sm);
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: opacity var(--transition); color: #fff; font-size: 15px;
+        }
+        .btn-send:hover { opacity: 0.8; }
+        .btn-send:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        /* ─── LEGEND / NODE INFO ─── */
+        #legend {
+            position: fixed; bottom: 16px; left: 16px;
+            background: var(--bg-surface); border: 1px solid var(--border);
+            border-radius: var(--radius-md); padding: 10px 14px;
+            font-size: 10px; color: var(--text-secondary); z-index: 50;
+            display: flex; flex-direction: column; gap: 5px;
+            backdrop-filter: blur(10px);
+        }
+        .legend-row { display: flex; align-items: center; gap: 7px; }
+        .legend-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+        /* ─── NODE TOOLTIP ─── */
+        #node-tooltip {
+            position: fixed; display: none;
+            background: var(--bg-elevated); border: 1px solid var(--border-accent);
+            border-radius: var(--radius-sm); padding: 6px 10px;
+            font-size: 11px; color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            pointer-events: none; z-index: 200;
+            box-shadow: var(--glow-blue);
+        }
+
+        /* ─── SPINNER ─── */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner {
+            width: 13px; height: 13px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: currentColor;
+            animation: spin 0.7s linear infinite;
+        }
+
+        /* ─── SCROLLBAR ─── */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        /* ─── FADE-IN ─── */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .panel { animation: fadeInUp 0.3s ease both; }
+        #left-panel  { animation-delay: 0.05s; }
+        #right-panel { animation-delay: 0.1s; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════ TOP BAR ═══════════════════ -->
+<header id="topbar">
+    <div class="topbar-brand">
+        <div class="topbar-logo">G</div>
+        <div>
+            <div class="topbar-title">GraphRAG</div>
+            <div class="topbar-subtitle">Ajan Hafıza Sistemi v1.0</div>
+        </div>
+    </div>
+
+    <div class="topbar-stats">
+        <div class="stat-chip">
+            <span class="dot dot-blue"></span>
+            <span id="node-count">0</span> düğüm
+        </div>
+        <div class="stat-chip">
+            <span class="dot dot-cyan"></span>
+            <span id="edge-count">0</span> ilişki
+        </div>
+        <div class="stat-chip">
+            <span class="dot dot-green"></span>
+            Neo4j · Ollama
+        </div>
+    </div>
+
+    <div class="topbar-controls">
+        <div id="status-badge">
+            <span class="pulse-dot"></span>
+            <span id="status-text">Hazır</span>
+        </div>
+        <div class="view-toggle">
+            <button id="btn-3d" class="view-btn active" onclick="setMode('3d')">3D</button>
+            <button id="btn-2d" class="view-btn" onclick="setMode('2d')">2D</button>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════════════════ LEFT PANEL ═══════════════════ -->
+<div class="panel" id="left-panel">
+    <div class="panel-header">
+        <div class="panel-icon blue">⬡</div>
+        <div>
+            <div class="panel-title">Hafıza İnşası</div>
+            <div class="panel-desc">Bilgi grafiğine veri enjekte et</div>
+        </div>
+    </div>
+    <div class="panel-body">
+        <div>
+            <label>Metin / Bilgi</label>
+            <textarea id="inputText" placeholder="Varlıklar ve ilişkiler içeren metni girin...">Ajan Çekirdeği, Bilişsel Motor tarafından yönetilir. Bilişsel Motor edindiği analizleri Bellek Modülü'ne kaydeder. Bellek Modülü, alt yapısında Milvus kullanır.</textarea>
+        </div>
+        <button class="btn btn-primary" onclick="processText()" id="submitBtn">
+            <span id="submit-icon">＋</span>
+            <span id="submit-label">Ağa Veri Ekle</span>
+        </button>
+        <div class="divider"></div>
+        <button class="btn btn-danger" onclick="clearMemory()" id="clearBtn">
+            ✕ &nbsp;Hafızayı Sıfırla
+        </button>
+    </div>
+</div>
+
+<!-- ═══════════════════ RIGHT PANEL ═══════════════════ -->
+<div class="panel" id="right-panel">
+    <div class="panel-header">
+        <div class="panel-icon purple">◈</div>
+        <div>
+            <div class="panel-title">Graph RAG · Ajan Sorgu</div>
+            <div class="panel-desc">Bilgi grafiği üzerinden çıkarım yap</div>
+        </div>
+    </div>
+    <div class="panel-body">
+        <div id="chat-history">
+            <div class="chat-empty" id="chat-empty">
+                Henüz soru sorulmadı.<br>Ajanın hafızasına bir şeyler ekleyip sormayı deneyin.
+            </div>
+        </div>
+        <div class="divider"></div>
+        <div>
+            <label>Soru</label>
+            <div class="chat-input-row">
+                <input type="text" id="questionInput" placeholder="Ajanın hafızasından ne öğrenmek istiyorsunuz?">
+                <button class="btn-send" onclick="askQuestion()" id="askBtn" title="Soruyu gönder">➤</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════ LEGEND ═══════════════════ -->
+<div id="legend">
+    <div class="legend-row" style="font-weight:600; color: var(--text-secondary); font-size:9px; text-transform:uppercase; letter-spacing:.08em; margin-bottom:2px;">Graf Göstergesi</div>
+    <div class="legend-row"><span class="legend-dot" style="background:#63b3ed;"></span> Varlık (Entity)</div>
+    <div class="legend-row"><span class="legend-dot" style="background:#f6c90e;"></span> Bölüm (Episodic)</div>
+    <div class="legend-row"><span class="legend-dot" style="background:#fc8181;"></span> Topluluk (Community)</div>
+    <div class="legend-row" style="margin-top:4px; color: var(--text-muted);">Sol Tık → Düğüm Detayı</div>
+</div>
+
+<!-- ═══════════════════ TOOLTIP ═══════════════════ -->
+<div id="node-tooltip"></div>
+
+<!-- ═══════════════════ GRAPH ═══════════════════ -->
+<div id="graph-container"></div>
+
+<script>
+    let currentMode = '3d';
+    let graphInstance = null;
+    let graphData = { nodes: [], links: [] };
+
+    // ── Status Helpers ──────────────────────────────────────────────
+    function setStatus(msg, state = 'idle') {
+        const badge = document.getElementById('status-badge');
+        const text  = document.getElementById('status-text');
+        badge.className = state;
+        text.textContent = msg;
+    }
+
+    function setLoading(btnId, labelId, iconId, loading) {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        btn.disabled = loading;
+        if (labelId) document.getElementById(labelId).textContent = loading ? 'İşleniyor...' : 'Ağa Veri Ekle';
+        if (iconId)  document.getElementById(iconId).innerHTML   = loading ? '<span class="spinner"></span>' : '＋';
+    }
+
+    // ── Graph ──────────────────────────────────────────────────────
+    function updateStats(data) {
+        document.getElementById('node-count').textContent = (data.nodes || []).length;
+        document.getElementById('edge-count').textContent = (data.links || []).length;
+    }
+
+    function initGraph(data) {
+        graphData = data;
+        updateStats(data);
+        const container = document.getElementById('graph-container');
+        container.innerHTML = '';
+
+        const tooltip = document.getElementById('node-tooltip');
+
+        if (currentMode === '3d') {
+            graphInstance = ForceGraph3D()(container)
+                .graphData(graphData)
+                .nodeLabel('name')
+                .nodeAutoColorBy('id')
+                .nodeResolution(16)
+                .linkDirectionalArrowLength(4)
+                .linkDirectionalArrowRelPos(1)
+                .linkLabel('name')
+                .linkColor(() => 'rgba(99,179,237,0.35)')
+                .backgroundColor('#050508')
+                .onNodeHover(node => {
+                    if (node) {
+                        tooltip.style.display = 'block';
+                        tooltip.textContent   = node.name || node.id;
+                    } else {
+                        tooltip.style.display = 'none';
+                    }
+                })
+                .onNodeClick(node => {
+                    if (node) {
+                        tooltip.style.display = 'block';
+                        tooltip.textContent   = node.name || node.id;
+                    }
+                });
+
+            container.addEventListener('mousemove', e => {
+                tooltip.style.left = (e.clientX + 14) + 'px';
+                tooltip.style.top  = (e.clientY + 14) + 'px';
+            });
+
+        } else {
+            graphInstance = ForceGraph()(container)
+                .graphData(graphData)
+                .nodeAutoColorBy('id')
+                .linkDirectionalArrowLength(6)
+                .linkDirectionalArrowRelPos(1)
+                .linkColor(() => 'rgba(99,179,237,0.3)')
+                .backgroundColor('#050508')
+                .linkCanvasObjectMode(() => 'after')
+                .linkCanvasObject((link, ctx) => {
+                    const LABEL = link.name;
+                    if (!LABEL) return;
+                    const fontSize = 3.5;
+                    ctx.font = `${fontSize}px Inter, sans-serif`;
+                    const tw = ctx.measureText(LABEL).width;
+                    const bw = tw + fontSize * 0.4;
+                    const bh = fontSize + fontSize * 0.4;
+                    const mx = link.x + (link.target.x - link.x) / 2;
+                    const my = link.y + (link.target.y - link.y) / 2;
+                    ctx.fillStyle = 'rgba(5,5,8,0.85)';
+                    ctx.fillRect(mx - bw/2, my - bh/2, bw, bh);
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillStyle = 'rgba(0,229,255,0.65)';
+                    ctx.fillText(LABEL, mx, my);
+                })
+                .nodeCanvasObject((node, ctx, scale) => {
+                    const label    = node.name || node.id;
+                    const fontSize = Math.max(3, 11 / scale);
+                    ctx.font       = `600 ${fontSize}px Inter, sans-serif`;
+                    const tw       = ctx.measureText(label).width;
+                    const pad      = fontSize * 0.35;
+                    const bw = tw + pad * 2;
+                    const bh = fontSize + pad * 2;
+                    ctx.fillStyle = 'rgba(5,5,8,0.75)';
+                    ctx.beginPath();
+                    ctx.roundRect(node.x - bw/2, node.y - bh/2, bw, bh, 2);
+                    ctx.fill();
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillStyle = node.color || '#63b3ed';
+                    ctx.fillText(label, node.x, node.y);
+                    node.__bckgDimensions = [bw, bh];
+                })
+                .nodePointerAreaPaint((node, color, ctx) => {
+                    const [bw, bh] = node.__bckgDimensions || [10, 10];
+                    ctx.fillStyle = color;
+                    ctx.fillRect(node.x - bw/2, node.y - bh/2, bw, bh);
+                })
+                .onNodeHover(node => {
+                    container.style.cursor = node ? 'pointer' : 'default';
+                    tooltip.style.display = node ? 'block' : 'none';
+                    if (node) tooltip.textContent = node.name || node.id;
+                })
+                .onNodeClick(node => {
+                    if (node) {
+                        tooltip.style.display = 'block';
+                        tooltip.textContent   = node.name || node.id;
+                    }
+                });
+
+            container.addEventListener('mousemove', e => {
+                tooltip.style.left = (e.clientX + 14) + 'px';
+                tooltip.style.top  = (e.clientY + 14) + 'px';
+            });
+        }
+    }
+
+    function setMode(mode) {
+        currentMode = mode;
+        document.getElementById('btn-3d').classList.toggle('active', mode === '3d');
+        document.getElementById('btn-2d').classList.toggle('active', mode === '2d');
+        initGraph(graphData);
+    }
+
+    function updateGraph() {
+        fetch('/api/graph')
+            .then(res => res.json())
+            .then(data => initGraph(data))
+            .catch(() => setStatus('Graf verisi alınamadı', 'error'));
+    }
+
+    // ── Ingestion ──────────────────────────────────────────────────
+    function processText() {
+        const textEl = document.getElementById('inputText');
+        if (!textEl.value.trim()) return;
+
+        setStatus('LLM varlıkları çıkarıyor...', 'loading');
+        setLoading('submitBtn', 'submit-label', 'submit-icon', true);
+
+        fetch('/api/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: textEl.value })
+        })
+        .then(res => res.json())
+        .then(data => {
+            setStatus(data.message || 'Eklendi', 'success');
+            textEl.value = '';
+            updateGraph();
+        })
+        .catch(() => setStatus('Bağlantı hatası', 'error'))
+        .finally(() => setLoading('submitBtn', 'submit-label', 'submit-icon', false));
+    }
+
+    function clearMemory() {
+        if (!confirm('Tüm ajan hafızasını kalıcı olarak silmek istediğinize emin misiniz?')) return;
+        setStatus('Hafıza temizleniyor...', 'loading');
+        document.getElementById('clearBtn').disabled = true;
+        fetch('/api/clear', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            setStatus(data.message || 'Sıfırlandı', 'success');
+            updateGraph();
+        })
+        .catch(() => setStatus('Silme hatası', 'error'))
+        .finally(() => { document.getElementById('clearBtn').disabled = false; });
+    }
+
+    // ── Graph RAG Chat ─────────────────────────────────────────────
+    function appendBubble(role, text) {
+        const history = document.getElementById('chat-history');
+        const empty   = document.getElementById('chat-empty');
+        if (empty) empty.remove();
+
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-bubble-wrap';
+        wrap.style.animation = 'fadeInUp 0.2s ease both';
+
+        const meta = document.createElement('div');
+        meta.className = `chat-meta ${role}`;
+        meta.textContent = role === 'user' ? '▸ Siz' : '◆ Ajan';
+
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble bubble-${role}`;
+        bubble.textContent = text;
+
+        wrap.appendChild(meta);
+        wrap.appendChild(bubble);
+        history.appendChild(wrap);
+        history.scrollTop = history.scrollHeight;
+        return bubble;
+    }
+
+    function askQuestion() {
+        const inputEl = document.getElementById('questionInput');
+        const question = inputEl.value.trim();
+        if (!question) return;
+
+        appendBubble('user', question);
+
+        const thinkingBubble = appendBubble('agent', 'Graf taranıyor, çıkarım yapılıyor...');
+        thinkingBubble.classList.add('bubble-thinking');
+
+        inputEl.value = '';
+        document.getElementById('askBtn').disabled = true;
+        setStatus('Sorgu işleniyor...', 'loading');
+
+        fetch('/api/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question })
+        })
+        .then(res => res.json())
+        .then(data => {
+            thinkingBubble.textContent = data.answer || 'Cevap üretilemedi.';
+            thinkingBubble.classList.remove('bubble-thinking');
+            setStatus('Hazır', 'idle');
+        })
+        .catch(() => {
+            thinkingBubble.textContent = 'LLM ile bağlantı kurulamadı.';
+            thinkingBubble.classList.add('bubble-thinking');
+            setStatus('Bağlantı hatası', 'error');
+        })
+        .finally(() => { document.getElementById('askBtn').disabled = false; });
+    }
+
+    document.getElementById('questionInput').addEventListener('keypress', e => {
+        if (e.key === 'Enter') { e.preventDefault(); askQuestion(); }
+    });
+
+    // ── Init ───────────────────────────────────────────────────────
+    updateGraph();
+</script>
+</body>
+</html>
