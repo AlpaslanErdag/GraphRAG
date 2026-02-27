@@ -139,15 +139,7 @@ GraphRAG_V1/
 ├── app.py                  # Flask backend + tüm API endpoint'leri
 ├── templates/
 │   └── index.html          # Modern tek sayfa arayüzü
-├── knowledge_graph_3d.html # Bağımsız 3D görselleştirme deneyi
-├── README.md
-└── ROADMAP.md
+└── README.md
 ```
 
 ---
-
-## Bilinen Kısıtlar
-
-- `asyncio.run()` her istekte yeni bir event loop açar; yüksek trafikte performansı düşürür.
-- Graf bağlamı filtre uygulanmadan tüm tripletleri çeker; büyük graflarda prompt uzar.
-- Kimlik doğrulama ve yetkilendirme mekanizması bulunmamaktadır (PoC seviyesi).
